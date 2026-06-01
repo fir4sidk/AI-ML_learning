@@ -140,7 +140,7 @@ def Trueres(tokensout,vocab,n):
     return TR
 
 
-def saveweights():
+def saveweights(wq , wk , wv , beta2 , beta1,gamma2,gamma1,wu,bu,wd,bd,We):
     changefiles(We,"embeding.csv")
     changefiles(wu,"wu.csv")
     changefiles(wd,"wd.csv")
@@ -154,7 +154,6 @@ def saveweights():
     changefiles(gamma1,"gamma1_1.csv")
     changefiles(beta1,"beta1_1.csv")
 def loadweights():
-    global wq , wk , wv , beta2 , beta1,gamma2,gamma1,wu,bu,wd,bd,We,vocab,dataset
     wq=importweight("wq.csv")
     wk=importweight("wk.csv")
     wv=importweight("wv.csv")
@@ -171,9 +170,11 @@ def loadweights():
     datafile=open("dataset.csv","r")
     dfilew=csv.reader(datafile,delimiter=";")
     dataset=[tuple(row) for row in dfilew]
+    return (wq , wk , wv , beta2 , beta1,gamma2,gamma1,wu,bu,wd,bd,We,vocab,dataset)
+    
+def changeweights(lr, We, wk, wq, wv, wu, wd, bu, bd, gamma2, beta2, gamma1, beta1,
+    dWe, dWk, dWq, dWv, dWu, dWd, dBu, dBd, dg2, dbeta2, dg1, dbeta1):
 
-def changeweights(lr):
-    global wq , wk , wv , beta2 , beta1,gamma2,gamma1,wu,bu,wd,bd,We
     We = changeweight(We, dWe, lr)
     wk = changeweight(wk, dWk, lr)
     wq = changeweight(wq, dWq, lr)
@@ -186,11 +187,10 @@ def changeweights(lr):
     beta2 = changeweight(beta2, dbeta2, lr)
     gamma1 = changeweight(gamma1, dg1, lr)
     beta1 = changeweight(beta1, dbeta1, lr)
+    return (wq , wk , wv , beta2 , beta1,gamma2,gamma1,wu,bu,wd,bd,We)
 
-def gradientcalc():
-    global dz, dRM, dg2, dbeta2, dX2, dWd, dBd, dRA, dAF, dFU, dWu, dBu
-    global dg1, dbeta1, dX1, dA, dSMA, dV, dM, dUM, dQ, dK, dEv, dEq, dEk
-    global dE, dWv, dWq, dWk, dWep, dWee, dWe
+def gradientcalc(FinalResult, TR, We, x2, gamma2, dmodel, FU, wu, wd, RA, 
+    x1, gamma1, V, SMA, dd, K, Q, wv, wq, wk, tokens, vocab):
     dz=FinalResult-TR
     dRM=dz @ We
     dg2=dgamma(hat(x2),dRM)
@@ -224,10 +224,33 @@ def gradientcalc():
     dWee=dembed(tokens,vocab,We,dE)
     dWe=dWee+dWep
 
-loadweights()
-step=798
-while step<800:
+    return (
+        dz, dRM, dg2, dbeta2, dX2, dWd, dBd, dRA, dAF, dFU, dWu, dBu,
+        dg1, dbeta1, dX1, dA, dSMA, dV, dM, dUM, dQ, dK, dEv, dEq, dEk,
+        dE, dWv, dWq, dWk, dWep, dWee, dWe
+    )
+
+
+def accumulate_weights(gWe, gwk, gwq, gwv, gwu, gwd, gbu, gbd, ggamma2, gbeta2, ggamma1, gbeta1,
+                       dWe, dWk, dWq, dWv, dWu, dWd, dBu, dBd, dg2, dbeta2, dg1, dbeta1,n):
+    gWe += (dWe/n)
+    gwk += (dWk/n)
+    gwq += (dWq/n)
+    gwv += (dWv/n)
+    gwu += (dWu/n)
+    gwd += (dWd/n)
+    gbu += (dBu/n)
+    gbd += (dBd/n)
+    ggamma2 += (dg2/n)
+    gbeta2 += (dbeta2/n)
+    ggamma1 += (dg1/n)
+    gbeta1 += (dbeta1/n)
+    return (gWe, gwk, gwq, gwv, gwu, gwd, gbu, gbd, ggamma2, gbeta2, ggamma1, gbeta1)
+(wq , wk , wv , beta2 , beta1,gamma2,gamma1,wu,bu,wd,bd,We,vocab,dataset)=loadweights()
+step=0
+while step<1600:
     avgloss=0
+    (gWe, gwk, gwq, gwv, gwu, gwd, gbu, gbd,ggamma2, gbeta2, ggamma1, gbeta1)=(0,0,0,0,0,0,0,0,0,0,0,0)
     for i in range(len(dataset)):
         #input / output processing : tokenizing / position embeding
         inp=dataset[i][0]
@@ -259,33 +282,46 @@ while step<800:
         l = TR * np.log(FinalResult + 1e-15)
         #final loss calculation =======================
         loss = -np.sum(l)
-        print("=============================")
-        print(loss)
         #adding it to sum of losses 
         avgloss+=loss
         
         #calculating the gradients
-        gradientcalc()
+        (dz, dRM, dg2, dbeta2, dX2, dWd, dBd, dRA, dAF, dFU, dWu, dBu,
+        dg1, dbeta1, dX1, dA, dSMA, dV, dM, dUM, dQ, dK, dEv, dEq, dEk,
+        dE, dWv, dWq, dWk, dWep, dWee, dWe)=gradientcalc(
+                                                    FinalResult, TR, We, x2, gamma2, dmodel, FU, wu, wd, RA, 
+                                                    x1, gamma1, V, SMA, dd, K, Q, wv, wq, wk, tokens, vocab)
 
+
+        #calculating the sum of the gradients
+        (gWe, gwk, gwq, gwv, gwu, gwd, gbu, gbd,
+         ggamma2, gbeta2, ggamma1, gbeta1)=accumulate_weights(gWe, gwk, gwq, gwv, gwu, gwd, gbu, gbd, ggamma2,
+          gbeta2, ggamma1, gbeta1,dWe, dWk, dWq, dWv, dWu, dWd, dBu, dBd, dg2, dbeta2, dg1, dbeta1,len(dataset))
         #setting a higher learning rate for the first 2000 step (warmup steps) then dividing it by half 
         if step <2000:
             lr=0.01
         else:
             lr=0.005
-        
-        #updating the weights 
-        changeweights(lr)
+        if i % 20 ==0:
+            #updating the weights after every micro-batch (20 data item)
+            #i made it update the weights based on the average of gradients
+            (wq , wk , wv , beta2 , beta1,
+            gamma2,gamma1,wu,bu,wd,bd,We)=changeweights(lr, We, wk, wq, wv, wu, wd, bu, bd, gamma2, beta2, gamma1, beta1,
+                                                        gWe, gwk, gwq, gwv, gwu, gwd, gbu, gbd, ggamma2, gbeta2, ggamma1, gbeta1)
+            (gWe, gwk, gwq, gwv, gwu, gwd, gbu, gbd,ggamma2, gbeta2, ggamma1, gbeta1)=(0,0,0,0,0,0,0,0,0,0,0,0)
+
+
     #calculating the average loss for the actual epoche
     avgloss=avgloss/len(dataset)
     #here step means epoche
     step+=1
     #logging the las average of loss after an amount of epoches and saving the weights to files
-    if step % 100 ==0:
+    if step % 200 ==0:
         print("last avgloss=",avgloss)
         print(step) 
-        saveweights()
+        saveweights(wq , wk , wv , beta2 , beta1,gamma2,gamma1,wu,bu,wd,bd,We)
     if avgloss <0.3:
-        saveweights()
+        saveweights(wq , wk , wv , beta2 , beta1,gamma2,gamma1,wu,bu,wd,bd,We)
         break
 #inp=str(input("give a arithmetic formula: "))
 #import re
