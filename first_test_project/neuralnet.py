@@ -3,8 +3,8 @@ import csv
 import math
 
 
-dmodel=128
-dd=32
+dmodel=32
+dd=8
 def changeweight(wold,dw,lr):
     return np.clip((wold - (lr * dw )).copy(),-1,1)
     
@@ -248,7 +248,7 @@ def accumulate_weights(gWe, gwk, gwq, gwv, gwu, gwd, gbu, gbd, ggamma2, gbeta2, 
     return (gWe, gwk, gwq, gwv, gwu, gwd, gbu, gbd, ggamma2, gbeta2, ggamma1, gbeta1)
 (wq , wk , wv , beta2 , beta1,gamma2,gamma1,wu,bu,wd,bd,We,vocab,dataset)=loadweights()
 step=0
-while step<1600:
+while step<10000:
     avgloss=0
     (gWe, gwk, gwq, gwv, gwu, gwd, gbu, gbd,ggamma2, gbeta2, ggamma1, gbeta1)=(0,0,0,0,0,0,0,0,0,0,0,0)
     for i in range(len(dataset)):
@@ -292,18 +292,18 @@ while step<1600:
                                                     FinalResult, TR, We, x2, gamma2, dmodel, FU, wu, wd, RA, 
                                                     x1, gamma1, V, SMA, dd, K, Q, wv, wq, wk, tokens, vocab)
 
-
+        batch_size=len(dataset)
         #calculating the sum of the gradients
         (gWe, gwk, gwq, gwv, gwu, gwd, gbu, gbd,
          ggamma2, gbeta2, ggamma1, gbeta1)=accumulate_weights(gWe, gwk, gwq, gwv, gwu, gwd, gbu, gbd, ggamma2,
-          gbeta2, ggamma1, gbeta1,dWe, dWk, dWq, dWv, dWu, dWd, dBu, dBd, dg2, dbeta2, dg1, dbeta1,len(dataset))
+          gbeta2, ggamma1, gbeta1,dWe, dWk, dWq, dWv, dWu, dWd, dBu, dBd, dg2, dbeta2, dg1, dbeta1,batch_size)
         #setting a higher learning rate for the first 2000 step (warmup steps) then dividing it by half 
-        if step <2000:
+        if step <=5000:
             lr=0.01
         else:
             lr=0.005
-        if i % 20 ==0:
-            #updating the weights after every micro-batch (20 data item)
+        if (i+1) % batch_size ==0:
+            #updating the weights after every micro-batch ('batch_size' data item)
             #i made it update the weights based on the average of gradients
             (wq , wk , wv , beta2 , beta1,
             gamma2,gamma1,wu,bu,wd,bd,We)=changeweights(lr, We, wk, wq, wv, wu, wd, bu, bd, gamma2, beta2, gamma1, beta1,
@@ -316,13 +316,10 @@ while step<1600:
     #here step means epoche
     step+=1
     #logging the las average of loss after an amount of epoches and saving the weights to files
-    if step % 200 ==0:
+    if step % 1000 ==0:
         print("last avgloss=",avgloss)
         print(step) 
         saveweights(wq , wk , wv , beta2 , beta1,gamma2,gamma1,wu,bu,wd,bd,We)
-    if avgloss <0.3:
-        saveweights(wq , wk , wv , beta2 , beta1,gamma2,gamma1,wu,bu,wd,bd,We)
-        break
 #inp=str(input("give a arithmetic formula: "))
 #import re
 #pattern = r'[a-zA-Z\d\.]+|\*\*|.'

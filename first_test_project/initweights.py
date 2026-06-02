@@ -2,8 +2,8 @@ import random
 import numpy as np
 import csv
 import math
-dmodel=128
-dd=32
+dmodel=32
+dd=8
 def createweight(path,d):
   f=open(path,"w")
   w=np.random.randn(d[0],d[1]) * 0.1
