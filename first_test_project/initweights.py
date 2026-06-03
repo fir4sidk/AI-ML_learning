@@ -17,10 +17,15 @@ def newdataset():
     for __ in range (200):
         a=random.randint(0,9)
         b=random.randint(0,9)
-        ta=(f"{a:02d}+{b:02d}=",f"+{b:02d}={(a+b):02d}")
-        tc=(f"{a:02d}-{b:02d}=",f"-{b:02d}={(a-b):02d}")
+        add=(f"{a:02d}+{b:02d}={(a+b):02d}EOS")
+        if a>b:
+            sub=(f"{a:02d}-{b:02d}={(a-b):02d}EOS")
+        else:
+            sub=(f"{b:02d}-{a:02d}={(b-a):02d}EOS")
+        ta=(add[:-3],add[1:])
+        ts=(sub[:-3],sub[1:])
         dataset.append(ta)
-        dataset.append(tc)
+        dataset.append(ts)
     datafile=open("dataset.csv","w")
     datafilewriter=csv.writer(datafile,delimiter=";")
     datafilewriter.writerows(dataset)
@@ -29,13 +34,7 @@ def newembeding(d):
     vocab = [
     "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", ".",
 
-    "+", "-", "x", "/", "=", "(", ")", "[", "]", ",","|",
-
-    "^", "**", "sqrt", "%", "!", "log", "ln",
-
-    "sin", "cos", "tan", "arcsin", "arccos", "arctan",
-
-    "pi", "e"
+    "+", "-", "x", "=","EOS"
 ]
 
     createweight("embeding.csv",(len(vocab),d))
@@ -43,7 +42,7 @@ def newembeding(d):
     wr=csv.writer(f,delimiter=";")
     wr.writerow(vocab)
     f.close()
-
+newdataset()
 newembeding(dmodel)
 for i in range (1,2):
     for j in range (1,3):
