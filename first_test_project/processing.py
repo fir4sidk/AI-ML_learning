@@ -2,7 +2,7 @@ dmodel=128
 h=4
 dk=dmodel//h
 dv=dmodel//h
-
+L=2
 def PE(seq_len, dmodel):
     i = np.arange(seq_len)[:, np.newaxis]  # Shape (seq_len, 1)
     j = np.arange(dmodel)[np.newaxis, :]   # Shape (1, dmodel)
@@ -45,10 +45,10 @@ def loadweights():
     wq=np.load("wq.npy")
     wk=np.load("wk.npy")
     wv=np.load("wv.npy")
-    beta2=np.load("beta1_2.npy")
-    gamma2=np.load("gamma1_2.npy")
-    beta1=np.load("beta1_1.npy")
-    gamma1=np.load("gamma1_1.npy")
+    beta2=np.load("beta2.npy")
+    gamma2=np.load("gamma2.npy")
+    beta1=np.load("beta1.npy")
+    gamma1=np.load("gamma1.npy")
     wu=np.load("wu.npy")
     bu=np.load("bu.npy")
     wd=np.load("wd.npy")
@@ -68,25 +68,24 @@ def readres(FR,vocab):
     vo=numpy.asarray(o)
     v=vo[pos]
     print(v)
-
-def masking1(m):
+def masking(m):
   s=m.shape
   c=m.copy()
-  ind=np.triu_indices(s[1], k=1)
-  c[:,ind[0],ind[1]]=-9999
+  ind=np.triu_indices(s[2], k=1)
+  c[:,:,ind[0],ind[1]]=-9999
   return c
 
-def attention1(E,dk,Wqt,Wkt,Wvt,Wo,h):
-  K= E[None,:,:] @ Wkt
-  Q= E[None,:,:] @ Wqt
-  V= E[None,:,:] @ Wvt
-  KT=np.transpose(K,(0,2,1))
-  M=masking1(Q @ KT)
-  SMA=softmax(M / np.sqrt(dk))
-  O=SMA @ V
-  con=np.reshape(O.transpose(1,0,2),(O.shape[1],dk*h))
-  A=con @ Wo
-  return (A,SMA,Q,K,V,con)
+def attention(E,dk,Wqt,Wkt,Wvt,Wo,h):
+    K= E[:,None,:,:] @ Wkt
+    Q= E[:,None,:,:] @ Wqt
+    V= E[:,None,:,:] @ Wvt
+    KT=np.transpose(K,(0,1,3,2))
+    M=masking(Q @ KT)
+    SMA=softmax(M / np.sqrt(dk))
+    O=SMA @ V
+    con=np.reshape(O.transpose(0,2,1,3),(O.shape[0],O.shape[2],dk*h))
+    A=con @ Wo
+    return (A,SMA,Q,K,V,con)
 
 def posvoc(tokens,vocab):
   lind=np.array(list(map(vocab.get,tokens)))
@@ -98,37 +97,50 @@ import re
 import csv
 
 (wo,wq , wk , wv , beta2 , beta1,gamma2,gamma1,wu,bu,wd,bd,We,vocab,dataset)=loadweights()
-
-pattern = r'[a-zA-Z\.]+|\*\*|.'
-inp="12+14=26"
-output="2+14=26EOS"
+batch_size=1
+pattern = r'\d'
+inp="1234"
+print(f"input = {inp}")
 seq_len=len(re.findall(pattern,inp))
 step=0
 P=PE(seq_len,dmodel)
 tokens=re.findall(pattern,inp)
-tokensout=re.findall(pattern,output)
 posinput=posvoc(tokens,vocab)
-posoutput=posvoc(tokensout,vocab)
-TR=Trueres(tokensout,vocab,seq_len)
 
 avgloss=0
-(gWe, gwk, gwq, gwv, gwu, gwd, gbu, gbd,ggamma2, gbeta2, ggamma1, gbeta1)=(0,0,0,0,0,0,0,0,0,0,0,0)
-ET=(We[(posinput).astype(np.int16)])
-ET+=P
-(A,SMA,Q,K,V,con)=attention1(ET,dk,wq,wk,wv,wo,h)
+A=np.zeros((L,batch_size,seq_len,dmodel))
+con=np.zeros((L,batch_size,seq_len,dmodel))
+SMA=np.zeros((L,batch_size,h,seq_len,seq_len))
+Q=np.zeros((L,batch_size,h,seq_len,dmodel//h))
+K=np.zeros((L,batch_size,h,seq_len,dmodel//h))
+V=np.zeros((L,batch_size,h,seq_len,dmodel//h))
+x1=np.zeros((L,batch_size,seq_len,dmodel))
+RA=np.zeros((L,batch_size,seq_len,dmodel))
+M=np.zeros((L,batch_size,seq_len,dmodel))
+FU=np.zeros((L,batch_size,seq_len,dff))
+FA=np.zeros((L,batch_size,seq_len,dff))
+x2=np.zeros((L,batch_size,seq_len,dmodel))
+RM=np.zeros((L,batch_size,seq_len,dmodel))
+#embeding
+ET=np.zeros((L+1,batch_size,seq_len,dmodel))
+ET[0]=(We[(posinput).astype(np.int16)])[None]
+ET[0]+=P
+for i in range (L):
+      #attentioon ======
+        (A[i],SMA[i],Q[i],K[i],V[i],con[i])=attention(ET[i],dk,wq[i],wk[i],wv[i],wo[i],h)
+        x1[i]=ET[i]+A[i]
+        
+        RA[i]=LN(x1[i],gamma1[i],beta1[i])
+        
+        (M[i],FU[i],FA[i])=MLP(RA[i],wu[i],bu[i],wd[i],bd[i])
+        
+        x2[i]=RA[i]+M[i]
+        
+        RM[i]=LN(x2[i],gamma2[i],beta2[i])
+        ET[i+1]=RM[i]
+    
+    
+z=RM[L-1] @ We.T
 
-x1=ET+A
-
-RA=LN(x1,gamma1,beta1)
-
-(M,FU,FA)=MLP(RA,wu,bu,wd,bd)
-
-x2=RA+M
-
-RM=LN(x2,gamma2,beta2)
-
-z=RM @ We.T
-
-FinalResult=softmax(z)
-
+FinalResult=softmax(z).reshape(seq_len,len(vocab.keys()))
 readres(FinalResult,vocab)

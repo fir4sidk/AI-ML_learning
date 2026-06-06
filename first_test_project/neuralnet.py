@@ -6,6 +6,8 @@ dmodel=128
 h=4
 dk=dmodel//h
 dv=dmodel//h
+dff=dmodel*4
+L=2
 B1=0.9
 B2=0.999
 
@@ -60,16 +62,16 @@ def MLP(E,wu,bu,wd,bd):
     FFN=FA @ wd+ bd
     return FFN,FU , FA
 def attention(E,dk,Wqt,Wkt,Wvt,Wo,h):
-  K= E[:,None,:,:] @ Wkt
-  Q= E[:,None,:,:] @ Wqt
-  V= E[:,None,:,:] @ Wvt
-  KT=np.transpose(K,(0,1,3,2))
-  M=masking(Q @ KT)
-  SMA=softmax(M / np.sqrt(dk))
-  O=SMA @ V
-  con=np.reshape(O.transpose(0,2,1,3),(O.shape[0],O.shape[2],dk*h))
-  A=con @ Wo
-  return (A,SMA,Q,K,V,con)
+    K= E[:,None,:,:] @ Wkt
+    Q= E[:,None,:,:] @ Wqt
+    V= E[:,None,:,:] @ Wvt
+    KT=np.transpose(K,(0,1,3,2))
+    M=masking(Q @ KT)
+    SMA=softmax(M / np.sqrt(dk))
+    O=SMA @ V
+    con=np.reshape(O.transpose(0,2,1,3),(O.shape[0],O.shape[2],dk*h))
+    A=con @ Wo
+    return (A,SMA,Q,K,V,con)
 
 def PE(seq_len, dmodel):
     i = np.arange(seq_len)[:, np.newaxis]  # Shape (seq_len, 1)
@@ -110,12 +112,12 @@ def dBLN(dLN,X,H,gamma):
 
 def dgamma(Xh,dPR):
     G=dPR * Xh
-    dg=np.sum(G,axis=1)
+    dg=np.sum(G,axis=1,keepdims=True)
     return dg
 
 
 def dbeta(dPR):
-    db=np.sum(dPR,axis=1)
+    db=np.sum(dPR,axis=1,keepdims=True)
     return db
 
 def dembed (postokens,We,dE,batch_size):
@@ -148,20 +150,20 @@ def saveweights(wq , wk , wv , beta2 , beta1,gamma2,gamma1,wu,bu,wd,bd,We,wo):
     np.save("wq.npy", wq)
     np.save("wk.npy", wk)
     np.save("wv.npy", wv)
-    np.save("gamma1_2.npy", gamma2)
-    np.save("beta1_2.npy", beta2)
-    np.save("gamma1_1.npy", gamma1)
-    np.save("beta1_1.npy", beta1)
+    np.save("gamma2.npy", gamma2)
+    np.save("beta2.npy", beta2)
+    np.save("gamma1.npy", gamma1)
+    np.save("beta1.npy", beta1)
     np.save("wo",wo)
 def loadweights():
     wo=np.load("wo.npy")
     wq=np.load("wq.npy")
     wk=np.load("wk.npy")
     wv=np.load("wv.npy")
-    beta2=np.load("beta1_2.npy")
-    gamma2=np.load("gamma1_2.npy")
-    beta1=np.load("beta1_1.npy")
-    gamma1=np.load("gamma1_1.npy")
+    beta2=np.load("beta2.npy")
+    gamma2=np.load("gamma2.npy")
+    beta1=np.load("beta1.npy")
+    gamma1=np.load("gamma1.npy")
     wu=np.load("wu.npy")
     bu=np.load("bu.npy")
     wd=np.load("wd.npy")
@@ -175,7 +177,7 @@ def loadweights():
 
 def changeweights(lr, We, wk, wq, wv, wu, wd, bu, bd, gamma2, beta2, gamma1, beta1,wo,
     dWe, dWk, dWq, dWv, dWu, dWd, dBu, dBd, dg2, dbeta2, dg1, dbeta1,dwo,B1,B2,t,mv):
-    
+
     We = changeweight(We, dWe, lr,B1,B2,t,mv,0)
     wk = changeweight(wk, dWk, lr,B1,B2,t,mv,1)
     wq = changeweight(wq, dWq, lr,B1,B2,t,mv,2)
@@ -193,79 +195,113 @@ def changeweights(lr, We, wk, wq, wv, wu, wd, bu, bd, gamma2, beta2, gamma1, bet
     return (wq , wk , wv , beta2 , beta1,gamma2,gamma1,wu,bu,wd,bd,We,wo)
     
 def gradientcalc(FinalResult, TR, We, x2, gamma2, dmodel, FU, wu, wd, RA,
-    x1, gamma1, V, SMA, dk, K, Q, wv, wq, wk,Wo, postokens,E,RM,con,batch_size,h):
+    x1, gamma1, V, SMA, dk, K, Q, wv, wq, wk,Wo, postokens,E,RM,con,batch_size,h,seq_len,dff,L):
     dz = FinalResult - TR
+    #matrices init
+    dRM=np.zeros((L,batch_size,seq_len,dmodel))
+    dg2=np.zeros((L,batch_size,1,dmodel))
+    dbeta2=np.zeros((L,batch_size,1,dmodel))
+    dX2=np.zeros((L,batch_size,seq_len,dmodel))
+    dWd=np.zeros((L,batch_size,dff,dmodel))
+    dBd=np.zeros((L,batch_size,1,dmodel))
+    dRA=np.zeros((L,batch_size,seq_len,dmodel))
+    dAF=np.zeros((L,batch_size,seq_len,dff))
+    dFU=np.zeros((L,batch_size,seq_len,dff))
+    dWu=np.zeros((L,batch_size,dmodel,dff))
+    dBu=np.zeros((L,batch_size,1,dff))
+    dg1=np.zeros((L,batch_size,1,dmodel))
+    dbeta1=np.zeros((L,batch_size,1,dmodel))
+    dX1=np.zeros((L,batch_size,seq_len,dmodel))
+    dA=np.zeros((L,batch_size,seq_len,dmodel))
+    dWo=np.zeros((L,batch_size,dmodel,dmodel))
+    dcon=np.zeros((L,batch_size,seq_len,dmodel))
+    do=np.zeros((L,batch_size,h,seq_len,dmodel//h))
+    dSMA=np.zeros((L,batch_size,h,seq_len,seq_len))
+    dM=np.zeros((L,batch_size,h,seq_len,seq_len))
+    dK=np.zeros((L,batch_size,h,seq_len,dmodel//h))
+    dQ=np.zeros((L,batch_size,h,seq_len,dmodel//h))
+    dV=np.zeros((L,batch_size,h,seq_len,dmodel//h))
+    dWv=np.zeros((L,batch_size,h,dmodel,dmodel//h))
+    dWq=np.zeros((L,batch_size,h,dmodel,dmodel//h))
+    dWk=np.zeros((L,batch_size,h,dmodel,dmodel//h))
+    dEq=np.zeros((L,batch_size,h,seq_len,dmodel))
+    dEk=np.zeros((L,batch_size,h,seq_len,dmodel))
+    dEv=np.zeros((L,batch_size,h,seq_len,dmodel))
+    dE=np.zeros((L,batch_size,seq_len,dmodel))
+    #=======================================
+    dRM[L-1] = dz @ We
+    for i in range (L-1,-1,-1):
+    #hidden layer start
+
+      dg2[i] = dgamma(hat(x2[i]), dRM[i])
 
 
-    dRM = dz @ We
+      dbeta2[i] = dbeta(dRM[i])
 
 
-    dg2 = dgamma(hat(x2), dRM)
+      dX2[i] = dBLN(dRM[i], x2[i], dmodel, gamma2[i])
 
 
-    dbeta2 = dbeta(dRM)
+      dWd[i] = np.transpose(np.maximum(0, FU[i]),axes=(0,2,1)) @ dX2[i]
 
 
-    dX2 = dBLN(dRM, x2, dmodel, gamma2)
+      dBd[i] = np.sum(dX2[i], axis=1, keepdims=True)
 
 
-    dWd = np.transpose(np.maximum(0, FU),axes=(0,2,1)) @ dX2
+      dRA[i] = dX2[i] + (((dX2[i] @ np.transpose(wd[i])) * (FU[i] > 0)) @ np.transpose(wu[i]))
 
 
-    dBd = np.sum(dX2, axis=1, keepdims=True)
+      dAF[i] = dX2[i] @ np.transpose(wd[i])
 
 
-    dRA = dX2 + (((dX2 @ np.transpose(wd)) * (FU > 0)) @ np.transpose(wu))
+      dFU[i] = dAF[i] * (FU[i] > 0)
 
 
-    dAF = dX2 @ np.transpose(wd)
+      dWu[i] = np.transpose(RA[i], axes=(0, 2, 1)) @ dFU[i]
 
 
-    dFU = dAF * (FU > 0)
+      dBu[i] = np.sum(dFU[i], axis=1, keepdims=True)
 
 
-    dWu = np.transpose(RA, axes=(0, 2, 1)) @ dFU
+      dg1[i] = dgamma(hat(x1[i]), dRA[i])
 
 
-    dBu = np.sum(dFU, axis=1, keepdims=True)
+      dbeta1[i] = dbeta(dRA[i])
 
 
-    dg1 = dgamma(hat(x1), dRA)
+      dX1[i] = dBLN(dRA[i], x1[i], dmodel, gamma1[i])
 
 
-    dbeta1 = dbeta(dRA)
+      dA[i] = dX1[i]
+
+      dWo[i]=con[i].transpose(0,2,1) @ dA[i]
+      dcon[i]=dA[i] @ Wo[i].T
+      do[i]=np.array(np.split(dcon[i],h,axis=-1)).transpose(1,0,2,3)
+      dV[i]=SMA[i].transpose(0,1,3,2) @ do[i]
+      dSMA[i]=do[i] @ V[i].transpose(0,1,3,2)
+      dM[i]=(1/np.sqrt(dk)) * (dsoftmax(SMA[i],dSMA[i]))
+      dQ[i]=dM[i] @ K[i]
+      dK[i]= dM[i].transpose(0,1,3,2) @ Q[i]
+      
+      dWv[i] = np.transpose(E[i], axes=(0, 2, 1))[:,None,:,:] @ dV[i]
 
 
-    dX1 = dBLN(dRA, x1, dmodel, gamma1)
+      dWq[i] = np.transpose(E[i], axes=(0, 2, 1))[:,None,:,:] @ dQ[i]
 
 
-    dA = dX1
+      dWk[i] = np.transpose(E[i], axes=(0, 2, 1))[:,None,:,:] @ dK[i]
 
-    dWo=con.transpose(0,2,1) @ dA
-    dcon=dA @ Wo.T
-    do=np.array(np.split(con,h,axis=-1)).transpose(1,0,2,3)
-    dV=SMA.transpose(0,1,3,2) @ do
-    dSMA=do @ V.transpose(0,1,3,2)
-    dM=(1/np.sqrt(dk)) * (dsoftmax(SMA,dSMA))
-    dQ=dM @ K
-    dK= dM.transpose(0,1,3,2) @ Q
+      dEk[i]=dK[i] @ wk[i].transpose(0,2,1)
+      dEq[i]=dQ[i] @ wq[i].transpose(0,2,1)
+      dEv[i]=dV[i] @ wv[i].transpose(0,2,1)
+      dE[i]=np.sum(dEk[i]+dEq[i]+dEv[i],axis=1)+dX1[i]
+      if i > 0:
+          dRM[i-1]=dE[i]
+    #hidden layer end
+    dWep = np.transpose(dz, axes=(0, 2, 1)) @ RM[L-1]
+
     
-    dWv = np.transpose(E, axes=(0, 2, 1))[:,None,:,:] @ dV
-
-
-    dWq = np.transpose(E, axes=(0, 2, 1))[:,None,:,:] @ dQ
-
-
-    dWk = np.transpose(E, axes=(0, 2, 1))[:,None,:,:] @ dK
-
-    dEk=dK @ wk.transpose(0,2,1)
-    dEq=dQ @ wq.transpose(0,2,1)
-    dEv=dV @ wv.transpose(0,2,1)
-    dE=np.sum(dEk+dEq+dEv,axis=1)
-    dWep = np.transpose(dz, axes=(0, 2, 1)) @ RM
-
-    
-    dWee = dembed(postokens, We, dE,batch_size)
+    dWee = dembed(postokens, We, dE[0],batch_size)
 
     dWe = dWee + dWep
 
@@ -291,30 +327,32 @@ def initmoments(s0,s1,s2,s3,s4,s5,s6,s7,s8,s9,s10,s11,s12):
 
 def accumulate_weights(dg2, dbeta2, dWd, dBd, dWu, dBu,dg1, dbeta1,dWv, dWq, dWk, dWe,dWo,n):
     gWe = np.sum(dWe,axis=0) / n
-    gwk = np.sum(dWk,axis=0) / n
-    gwq = np.sum(dWq,axis=0) / n
-    gwv = np.sum(dWv,axis=0) / n
-    gwu = np.sum(dWu,axis=0) / n
-    gwd = np.sum(dWd,axis=0) / n
-    gbu = np.sum(dBu,axis=0) / n
-    gbd = np.sum(dBd,axis=0) / n
-    ggamma2 = np.sum(dg2,axis=0) / n
-    gbeta2 = np.sum(dbeta2,axis=0) / n
-    ggamma1 = np.sum(dg1,axis=0) / n
-    gbeta1 = np.sum(dbeta1,axis=0) / n
-    gwo=np.sum(dWo,axis=0) /n
+    gwk = np.sum(dWk,axis=1) / n
+    gwq = np.sum(dWq,axis=1) / n
+    gwv = np.sum(dWv,axis=1) / n
+    gwu = np.sum(dWu,axis=1) / n
+    gwd = np.sum(dWd,axis=1) / n
+    gbu = np.sum(dBu,axis=1) / n
+    gbd = np.sum(dBd,axis=1) / n
+    ggamma2 = np.sum(dg2,axis=1) / n
+    gbeta2 = np.sum(dbeta2,axis=1) / n
+    ggamma1 = np.sum(dg1,axis=1) / n
+    gbeta1 = np.sum(dbeta1,axis=1) / n
+    gwo=np.sum(dWo,axis=1) /n
     return (gWe, gwk, gwq, gwv, gwu, gwd, gbu, gbd, ggamma2, gbeta2, ggamma1, gbeta1,gwo)
 def posvoc(tokens,vocab):
   lind=np.array(list(map(vocab.get,tokens)))
   return lind
 
 import re
-pattern = r'[a-zA-Z\.]+|\*\*|.'
+pattern = r'\d'
 
 (wo,wq , wk , wv , beta2 , beta1,gamma2,gamma1,wu,bu,wd,bd,We,vocab,dataset)=loadweights()
 mv = initmoments(We.shape,wk.shape,wq.shape,wo.shape,wv.shape,wu.shape,wd.shape,bu.shape,bd.shape,gamma2.shape,beta2.shape,gamma1.shape,beta1.shape)
 batch_size=len(dataset)
 seq_len=len(re.findall(pattern,dataset[0][0]))
+print(re.findall(pattern, dataset[0][0]))
+print(re.findall(pattern, dataset[0][1]))
 step=0
 P=PE(seq_len,dmodel)
 
@@ -333,28 +371,46 @@ seq_len=len(posinput[0])
 posoutput=(posoutput + (np.arange(len(dataset))*We.shape[0])[:,np.newaxis]).astype(np.int32)
 posinput=np.array(posinput)
 posoutput=np.array(posoutput)
-while step<200000:
+while step<100000:
     step+=1
     avgloss=0
-    (gWe, gwk, gwq, gwv, gwu, gwd, gbu, gbd,ggamma2, gbeta2, ggamma1, gbeta1)=(0,0,0,0,0,0,0,0,0,0,0,0)
-    ET=np.zeros((batch_size,seq_len,dmodel))
-    ET=(We[(posinput).astype(np.int16)])
-    ET+=P
+    #matrices initialization for multi layers
+    A=np.zeros((L,batch_size,seq_len,dmodel))
+    con=np.zeros((L,batch_size,seq_len,dmodel))
+    SMA=np.zeros((L,batch_size,h,seq_len,seq_len))
+    Q=np.zeros((L,batch_size,h,seq_len,dmodel//h))
+    K=np.zeros((L,batch_size,h,seq_len,dmodel//h))
+    V=np.zeros((L,batch_size,h,seq_len,dmodel//h))
+    x1=np.zeros((L,batch_size,seq_len,dmodel))
+    RA=np.zeros((L,batch_size,seq_len,dmodel))
+    M=np.zeros((L,batch_size,seq_len,dmodel))
+    FU=np.zeros((L,batch_size,seq_len,dff))
+    FA=np.zeros((L,batch_size,seq_len,dff))
+    x2=np.zeros((L,batch_size,seq_len,dmodel))
+    RM=np.zeros((L,batch_size,seq_len,dmodel))
+    #embeding
+    ET=np.zeros((L+1,batch_size,seq_len,dmodel))
+    ET[0]=(We[(posinput).astype(np.int16)])
+    ET[0]+=P
+    #============================================
 
-    #attentioon ======
-    (A,SMA,Q,K,V,con)=attention(ET,dk,wq,wk,wv,wo,h)
-
-    x1=ET+A
-
-    RA=LN(x1,gamma1,beta1)
-
-    (M,FU,FA)=MLP(RA,wu,bu,wd,bd)
-
-    x2=RA+M
-
-    RM=LN(x2,gamma2,beta2)
-
-    z=RM @ We.T
+    for i in range (L):
+      #attentioon ======
+        (A[i],SMA[i],Q[i],K[i],V[i],con[i])=attention(ET[i],dk,wq[i],wk[i],wv[i],wo[i],h)
+        
+        x1[i]=ET[i]+A[i]
+        
+        RA[i]=LN(x1[i],gamma1[i],beta1[i])
+        
+        (M[i],FU[i],FA[i])=MLP(RA[i],wu[i],bu[i],wd[i],bd[i])
+        
+        x2[i]=RA[i]+M[i]
+        
+        RM[i]=LN(x2[i],gamma2[i],beta2[i])
+        ET[i+1]=RM[i]
+    
+    
+    z=RM[L-1] @ We.T
 
     FinalResult=softmax(z)
 
@@ -369,18 +425,22 @@ while step<200000:
     (dg2, dbeta2, dWd, dBd, dWu, dBu,
         dg1, dbeta1,
         dWv, dWq, dWk, dWe,dWo)=gradientcalc(FinalResult, TR, We, x2, gamma2, dmodel, FU, wu, wd, RA,
-                                      x1, gamma1, V, SMA, dk, K, Q, wv, wq, wk,wo, posoutput,ET,RM,con,batch_size,h)
+                                      x1, gamma1, V, SMA, dk, K, Q, wv, wq, wk,wo, posoutput,ET,RM,con,batch_size,h,seq_len,dff,L)
+    
         #calculating the sum of the gradients
     (gWe, gwk, gwq, gwv, gwu, gwd, gbu, gbd,
          ggamma2, gbeta2, ggamma1, gbeta1,gwo)=accumulate_weights(dg2, dbeta2, dWd, dBd, dWu, dBu,dg1, dbeta1,dWv, dWq, dWk, dWe,dWo,batch_size)
     
-    
 
 
-    if step <=150000:
-      lr=0.0001
+    if step <= 500:
+        lr = 0.0001 * (step / 500)  # warmup
+    elif step <= 30000:
+        lr = 0.0001
+    elif step <= 100000:
+        lr = 0.00003
     else:
-      lr=0.0001
+        lr = 0.00001
 
 
     (wq , wk , wv , beta2 , beta1,
