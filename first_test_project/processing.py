@@ -1,3 +1,20 @@
+dmodel=128
+h=4
+dk=dmodel//h
+dv=dmodel//h
+
+def PE(seq_len, dmodel):
+    i = np.arange(seq_len)[:, np.newaxis]  # Shape (seq_len, 1)
+    j = np.arange(dmodel)[np.newaxis, :]   # Shape (1, dmodel)
+
+
+    angle = i / (10000 ** (2 * j / dmodel))
+
+    p = np.zeros((seq_len, dmodel))
+    p[:, 0::2] = np.sin(angle[:, 0::2])
+    p[:, 1::2] = np.cos(angle[:, 1::2])
+    return p
+
 def Trueres(tokensout,vocab,n):
     TR=np.zeros((n,len(vocab)))
     lind=list(map(vocab.get,tokensout))
@@ -15,6 +32,13 @@ def MLP(E,wu,bu,wd,bd):
     FA=np.maximum(0,FU)
     FFN=FA @ wd+ bd
     return FFN,FU , FA
+def importvocab(path):
+    f=open(path,"r")
+    r=csv.reader(f,delimiter=";")
+    v=list(r)[0]
+    M = {x:int(i) for i,x in enumerate(v)}
+    f.close()
+    return M
 
 def loadweights():
     wo=np.load("wo.npy")
@@ -39,7 +63,7 @@ def loadweights():
 
 def readres(FR,vocab):
     import numpy
-    pos = np.argmax(FinalResult, axis=1).get()
+    pos = np.argmax(FR, axis=1).get()
     o=list(vocab.keys())
     vo=numpy.asarray(o)
     v=vo[pos]
@@ -71,6 +95,10 @@ def posvoc(tokens,vocab):
 
 import cupy as np
 import re
+import csv
+
+(wo,wq , wk , wv , beta2 , beta1,gamma2,gamma1,wu,bu,wd,bd,We,vocab,dataset)=loadweights()
+
 pattern = r'[a-zA-Z\.]+|\*\*|.'
 inp="12+14=26"
 output="2+14=26EOS"
@@ -85,7 +113,6 @@ TR=Trueres(tokensout,vocab,seq_len)
 
 avgloss=0
 (gWe, gwk, gwq, gwv, gwu, gwd, gbu, gbd,ggamma2, gbeta2, ggamma1, gbeta1)=(0,0,0,0,0,0,0,0,0,0,0,0)
-ET=np.zeros((batch_size,seq_len,dmodel))
 ET=(We[(posinput).astype(np.int16)])
 ET+=P
 (A,SMA,Q,K,V,con)=attention1(ET,dk,wq,wk,wv,wo,h)
