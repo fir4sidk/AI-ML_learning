@@ -2,21 +2,22 @@ import random
 import numpy as np
 import csv
 import math
-dmodel=32
-dd=8
+dmodel=128
+h=4
+dk=dmodel//h
+dv=dmodel//h
+dff=dmodel*4
 def createweight(path,d):
-  f=open(path,"w")
-  w=np.random.randn(d[0],d[1]) * 0.1
-  file_=csv.writer(f,delimiter=";")
-  file_.writerows(w)
-  f.close()
+  w=np.random.randn(*d) * 0.1
+  np.save(path,w)
+  
 # Synthetic Arithmetic Dataset (Addition & Subtraction)
 
 def newdataset():
     dataset =[]
     for __ in range (200):
-        a=random.randint(0,9)
-        b=random.randint(0,9)
+        a=random.randint(0,40)
+        b=random.randint(0,40)
         add=(f"{a:02d}+{b:02d}={(a+b):02d}EOS")
         if a>b:
             sub=(f"{a:02d}-{b:02d}={(a-b):02d}EOS")
@@ -37,7 +38,7 @@ def newembeding(d):
     "+", "-", "x", "=","EOS"
 ]
 
-    createweight("embeding.csv",(len(vocab),d))
+    createweight("embeding",(len(vocab),d))
     f=open("vocab.csv","w")
     wr=csv.writer(f,delimiter=";")
     wr.writerow(vocab)
@@ -46,12 +47,13 @@ newdataset()
 newembeding(dmodel)
 for i in range (1,2):
     for j in range (1,3):
-      createweight("beta"+str(i)+"_"+str(j)+".csv",(1,dmodel))
-      createweight("gamma"+str(i)+"_"+str(j)+".csv",(1,dmodel))
-createweight("wu.csv",(dmodel,dmodel*2))
-createweight("bu.csv",(1,dmodel*2))
-createweight("wd.csv",(dmodel*2,dmodel))
-createweight("bd.csv",(1,dmodel))
-createweight("wq.csv",(dmodel,dd))
-createweight("wk.csv",(dmodel,dd))
-createweight("wv.csv",(dmodel,dmodel))
+      createweight("beta"+str(i)+"_"+str(j),(1,dmodel))
+      createweight("gamma"+str(i)+"_"+str(j),(1,dmodel))
+createweight("wu",(dmodel,dff))
+createweight("bu",(1,dff))
+createweight("wd",(dff,dmodel))
+createweight("bd",(1,dmodel))
+createweight("wq",(h,dmodel,dk))
+createweight("wk",(h,dmodel,dk))
+createweight("wv",(h,dmodel,dv))
+createweight("wo",(dv*h,dmodel))
